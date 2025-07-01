@@ -1,4 +1,4 @@
-module tfwrapper
+module github.com/raffraffraff/tfwrapper
 
 go 1.24.4
 
