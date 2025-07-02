@@ -1,22 +1,24 @@
 # tfwrapper
 
-`tfwrapper` is a Go CLI tool that generates a Terraform wrapper module for any remote Terraform module. It creates a new module that accepts a single JSON-encoded input variable and returns all outputs as a single object, making it easier to integrate with automation and configuration management systems. This project works with (terrahiera)[https://github.com/raffraffraff/terrahiera] and (tforder)[https://github.com/raffraffraff/tforder].
+`tfwrapper` is a Go CLI tool that generates a Terraform wrapper module for any remote Terraform module. It creates a new module that accepts a single JSON-encoded input variable and returns all outputs as a single object, making it easier to integrate with automation and configuration management systems.
 
 ## Features
 - Wraps any remote Terraform module (e.g., from the Terraform Registry or GitHub)
+- Supports submodule paths (e.g., `terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks`)
 - Accepts all module inputs as a single `config` variable (JSON-encoded)
 - Returns all module outputs as a single output object
 - Optionally supports iteration over a map of resources (`--iterable`)
-- Automatically formats generated `.tf` files
+- Automatically formats generated `.tf` files using HCL formatting
+- No external dependencies on Terraform/OpenTofu CLI tools
 
 ## Requirements
 - Go 1.18+
-- [OpenTofu](https://opentofu.org/) (or Terraform, if you adapt the code)
+- Git (for cloning remote repositories)
 
 ## Usage
 
 ```sh
-go run . -source <MODULE_SOURCE> [-version <MODULE_VERSION>] [-name <WRAPPER_NAME>] [-iterable]
+tfwrapper -source <MODULE_SOURCE> [-version <MODULE_VERSION>] [-name <WRAPPER_NAME>] [-iterable]
 ```
 
 - `-source` (required): The source of the Terraform module (e.g., `github.com/org/module`)
@@ -27,12 +29,12 @@ go run . -source <MODULE_SOURCE> [-version <MODULE_VERSION>] [-name <WRAPPER_NAM
 ### Example
 Wrap version 5.1.0 of the terraform-aws-modules VPC module, in subdirectory `terraform-aws-vpc`:
 ```sh
-go run . -source github.com/terraform-aws-modules/terraform-aws-vpc -version 5.1.0
+tfwrapper -source github.com/terraform-aws-modules/terraform-aws-vpc -version 5.1.0
 ```
 
 Wrap the latest version of the same module, in subdirectory `vpc`:
 ```sh
-go run . -source github.com/terraform-aws-modules/terraform-aws-vpc -name vpc
+tfwrapper -source github.com/terraform-aws-modules/terraform-aws-vpc -name vpc
 ```
 
 ## Output

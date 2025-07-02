@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"log"
@@ -109,42 +108,55 @@ func writeFile(dir, name, content string) {
 }
 
 func downloadModule(source, version, destDir string) (string, error) {
-	dummyTf := fmt.Sprintf(`module "source" {
-  source = "%s"
-  version = "%s"
-}`, source, version)
-	if version == "" {
-		dummyTf = fmt.Sprintf(`module "source" {
-  source = "%s"
-}`, source)
+	// Parse the module source to handle submodule paths
+	parts := strings.SplitN(source, "//", 2)
+	moduleSource := parts[0]
+	subPath := ""
+	if len(parts) > 1 {
+		subPath = parts[1]
 	}
 
-	if err := os.WriteFile(filepath.Join(destDir, "main.tf"), []byte(dummyTf), 0644); err != nil {
-		return "", fmt.Errorf("failed to write dummy main.tf: %w", err)
+	// Convert registry modules to GitHub URLs
+	if !strings.Contains(moduleSource, "://") && !strings.HasPrefix(moduleSource, "github.com/") {
+		// This looks like a registry module (e.g., "terraform-aws-modules/iam/aws")
+		// Convert to GitHub URL - remove the "/aws" provider suffix for GitHub
+		sourceParts := strings.Split(moduleSource, "/")
+		if len(sourceParts) >= 3 {
+			// Format: terraform-aws-modules/iam/aws -> terraform-aws-modules/terraform-aws-iam
+			org := sourceParts[0]
+			name := sourceParts[1]
+			provider := sourceParts[2]
+			moduleSource = fmt.Sprintf("https://github.com/%s/terraform-%s-%s.git", org, provider, name)
+		} else {
+			moduleSource = "https://github.com/" + moduleSource + ".git"
+		}
+	} else if strings.HasPrefix(moduleSource, "github.com/") {
+		// Add https:// prefix
+		moduleSource = "https://" + moduleSource + ".git"
 	}
 
-	cmd := exec.Command("tofu", "get")
-	cmd.Dir = destDir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	// Clone the repository
+	repoDir := filepath.Join(destDir, "repo")
+	cmd := exec.Command("git", "clone", "--depth=1", moduleSource, repoDir)
+	if version != "" {
+		// For tagged versions, we need to fetch the specific tag
+		cmd = exec.Command("git", "clone", "--depth=1", "--branch", version, moduleSource, repoDir)
+	}
+
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to run 'tofu get': %w\n%s", err, stderr.String())
+		return "", fmt.Errorf("failed to clone repository %s: %w", moduleSource, err)
 	}
 
-	modulePath := filepath.Join(destDir, ".tofu/modules/source")
-	// For local paths, the module path is different
-	if _, err := os.Stat(modulePath); os.IsNotExist(err) {
-		dirEntries, err := os.ReadDir(filepath.Join(destDir, ".tofu/modules"))
-		if err != nil || len(dirEntries) == 0 {
-			// Fallback for older terraform versions
-			modulePath = filepath.Join(destDir, ".terraform/modules/source")
-			if _, err := os.Stat(modulePath); os.IsNotExist(err) {
-				return "", fmt.Errorf("could not find downloaded module directory")
-			}
-		}
-		if len(dirEntries) > 0 {
-			modulePath = filepath.Join(destDir, ".tofu/modules", dirEntries[0].Name())
-		}
+	// Determine the final module path
+	modulePath := repoDir
+	if subPath != "" {
+		modulePath = filepath.Join(repoDir, subPath)
+	}
+
+	// Verify the module directory exists and contains variables.tf
+	variablesPath := filepath.Join(modulePath, "variables.tf")
+	if _, err := os.Stat(variablesPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("variables.tf not found in module path %s", modulePath)
 	}
 
 	return modulePath, nil
