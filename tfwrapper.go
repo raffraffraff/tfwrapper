@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// Parse variables.tf
-	vars, err := parseVariables(filepath.Join(modulePath, "variables.tf"))
+	vars, varOrder, varComments, err := parseVariables(filepath.Join(modulePath, "variables.tf"))
 	if err != nil {
 		log.Fatalf("Failed to parse variables.tf: %v", err)
 	}
@@ -76,7 +76,7 @@ func main() {
 	writeFile(modName, "variables.tf", variables)
 
 	// Write main.tf
-	mainTf := generateMainTf(*source, *version, *iterable, vars)
+	mainTf := generateMainTf(*source, *version, *iterable, vars, varOrder, varComments)
 	writeFile(modName, "main.tf", mainTf)
 
 	// Write outputs.tf
@@ -163,16 +163,16 @@ func downloadModule(source, version, destDir string) (string, error) {
 	return modulePath, nil
 }
 
-func parseVariables(filePath string) (map[string]string, error) {
+func parseVariables(filePath string) (map[string]string, []string, map[string]string, error) {
 	src, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read variables file: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to read variables file: %w", err)
 	}
 
 	parser := hclparse.NewParser()
 	file, diags := parser.ParseHCL(src, filepath.Base(filePath))
 	if diags.HasErrors() {
-		return nil, fmt.Errorf("failed to parse HCL: %s", diags.Error())
+		return nil, nil, nil, fmt.Errorf("failed to parse HCL: %s", diags.Error())
 	}
 
 	content, _, diags := file.Body.PartialContent(&hcl.BodySchema{
@@ -181,13 +181,21 @@ func parseVariables(filePath string) (map[string]string, error) {
 		},
 	})
 	if diags.HasErrors() {
-		return nil, fmt.Errorf("failed to decode HCL: %s", diags.Error())
+		return nil, nil, nil, fmt.Errorf("failed to decode HCL: %s", diags.Error())
 	}
 
 	vars := make(map[string]string)
+	varOrder := make([]string, 0)
+	varComments := make(map[string]string)
+
+	// Parse the source to extract comments above variable blocks
+	lines := strings.Split(string(src), "\n")
+
 	for _, block := range content.Blocks {
 		if block.Type == "variable" {
 			varName := block.Labels[0]
+			varOrder = append(varOrder, varName)
+
 			attrs, _ := block.Body.JustAttributes()
 			var defaultValue string
 			if defAttr, ok := attrs["default"]; ok {
@@ -204,9 +212,46 @@ func parseVariables(filePath string) (map[string]string, error) {
 				defaultValue = "null" // No default value
 			}
 			vars[varName] = defaultValue
+
+			// Extract comments before this variable block
+			startLine := block.DefRange.Start.Line - 1 // Convert to 0-based
+			comment := extractCommentAboveVariable(lines, startLine)
+			if comment != "" {
+				varComments[varName] = comment
+			}
 		}
 	}
-	return vars, nil
+	return vars, varOrder, varComments, nil
+}
+
+func extractCommentAboveVariable(lines []string, varStartLine int) string {
+	var commentLines []string
+
+	// Look backwards from the variable line to find comments
+	for i := varStartLine - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+
+		// Stop if we hit a non-comment, non-empty line
+		if line != "" && !strings.HasPrefix(line, "#") {
+			break
+		}
+
+		// If it's a comment line, add it to the front of our slice
+		if strings.HasPrefix(line, "#") {
+			commentLines = append([]string{line}, commentLines...)
+		}
+
+		// If it's an empty line and we already have comments, include it
+		if line == "" && len(commentLines) > 0 {
+			commentLines = append([]string{line}, commentLines...)
+		}
+	}
+
+	if len(commentLines) == 0 {
+		return ""
+	}
+
+	return strings.Join(commentLines, "\n")
 }
 
 func ctyValueToString(val cty.Value) string {
@@ -237,7 +282,7 @@ func ctyValueToString(val cty.Value) string {
 	return "null"
 }
 
-func generateMainTf(source, version string, iterable bool, vars map[string]string) string {
+func generateMainTf(source, version string, iterable bool, vars map[string]string, varOrder []string, varComments map[string]string) string {
 	var builder strings.Builder
 
 	// Add header comment with version info
@@ -264,16 +309,36 @@ func generateMainTf(source, version string, iterable bool, vars map[string]strin
 		configPrefix = "local.config."
 	}
 
-	// Sort variable names alphabetically for predictable output
-	varNames := make([]string, 0, len(vars))
-	for name := range vars {
-		varNames = append(varNames, name)
+	// Use original order if available, otherwise sort alphabetically
+	var varNames []string
+	if len(varOrder) > 0 {
+		varNames = varOrder
+	} else {
+		// Fallback to alphabetical sorting if no order was preserved
+		varNames = make([]string, 0, len(vars))
+		for name := range vars {
+			varNames = append(varNames, name)
+		}
+		sort.Strings(varNames)
 	}
-	sort.Strings(varNames)
 
-	// Add sorted variables
+	// Add variables with their comments
 	for _, name := range varNames {
 		def := vars[name]
+
+		// Add comment if it exists
+		if comment, exists := varComments[name]; exists {
+			// Add the comment with proper indentation
+			commentLines := strings.Split(comment, "\n")
+			for _, line := range commentLines {
+				if strings.TrimSpace(line) == "" {
+					builder.WriteString("\n")
+				} else {
+					builder.WriteString(fmt.Sprintf("  %s\n", line))
+				}
+			}
+		}
+
 		builder.WriteString(fmt.Sprintf("  %s = try(%s%s, %s)\n", name, configPrefix, name, def))
 	}
 
