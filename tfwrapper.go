@@ -247,10 +247,14 @@ func generateMainTf(source, version string, iterable bool, vars map[string]strin
 		builder.WriteString(fmt.Sprintf("# Module source: %s\n# Version: latest (no version constraint specified)\n\n", source))
 	}
 
-	builder.WriteString(fmt.Sprintf("module \"this\" {\n  source  = \"%s\"\n", source))
+	builder.WriteString("module \"this\" {\n")
+	builder.WriteString(fmt.Sprintf("  source = \"%s\"\n", source))
 	if version != "" {
 		builder.WriteString(fmt.Sprintf("  version = \"%s\"\n", version))
 	}
+
+	// Add empty line before variables
+	builder.WriteString("\n")
 
 	var configPrefix string
 	if iterable {
