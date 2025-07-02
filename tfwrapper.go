@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
@@ -238,9 +239,17 @@ func ctyValueToString(val cty.Value) string {
 
 func generateMainTf(source, version string, iterable bool, vars map[string]string) string {
 	var builder strings.Builder
+
+	// Add header comment with version info
+	if version != "" {
+		builder.WriteString(fmt.Sprintf("# Module source: %s\n# Version: %s\n\n", source, version))
+	} else {
+		builder.WriteString(fmt.Sprintf("# Module source: %s\n# Version: latest (no version constraint specified)\n\n", source))
+	}
+
 	builder.WriteString(fmt.Sprintf("module \"this\" {\n  source  = \"%s\"\n", source))
 	if version != "" {
-		builder.WriteString(fmt.Sprintf(`  version = \"%s\"\n`, version))
+		builder.WriteString(fmt.Sprintf("  version = \"%s\"\n", version))
 	}
 
 	var configPrefix string
@@ -251,7 +260,16 @@ func generateMainTf(source, version string, iterable bool, vars map[string]strin
 		configPrefix = "local.config."
 	}
 
-	for name, def := range vars {
+	// Sort variable names alphabetically for predictable output
+	varNames := make([]string, 0, len(vars))
+	for name := range vars {
+		varNames = append(varNames, name)
+	}
+	sort.Strings(varNames)
+
+	// Add sorted variables
+	for _, name := range varNames {
+		def := vars[name]
 		builder.WriteString(fmt.Sprintf("  %s = try(%s%s, %s)\n", name, configPrefix, name, def))
 	}
 
