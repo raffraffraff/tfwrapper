@@ -1,6 +1,6 @@
 module github.com/raffraffraff/tfwrapper
 
-go 1.23.7
+go 1.23
 
 require (
 	github.com/hashicorp/hcl/v2 v2.23.0
