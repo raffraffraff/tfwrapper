@@ -301,12 +301,12 @@ func generateMainTf(source, version string, iterable bool, vars map[string]strin
 	// Add empty line before variables
 	builder.WriteString("\n")
 
-	var configPrefix string
+	var configSource string
 	if iterable {
-		builder.WriteString("  for_each = try(local.config, {})\n\n")
-		configPrefix = "each.value."
+		builder.WriteString("  for_each = lookup(local.config, \"instances\", {})\n\n")
+		configSource = "each.value"
 	} else {
-		configPrefix = "local.config."
+		configSource = "local.config"
 	}
 
 	// Use original order if available, otherwise sort alphabetically
@@ -339,7 +339,7 @@ func generateMainTf(source, version string, iterable bool, vars map[string]strin
 			}
 		}
 
-		builder.WriteString(fmt.Sprintf("  %s = try(%s%s, %s)\n", name, configPrefix, name, def))
+		builder.WriteString(fmt.Sprintf("  %s = lookup(%s, \"%s\", %s)\n", name, configSource, name, def))
 	}
 
 	builder.WriteString("}\n")
